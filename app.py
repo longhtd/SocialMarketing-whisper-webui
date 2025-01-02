@@ -41,6 +41,53 @@ class App:
         print(f"Use \"{self.args.whisper_type}\" implementation\n"
               f"Device \"{self.whisper_inf.device}\" is detected")
 
+    def transcribe_audio_timing(self, model_name, audio_files):
+        if not audio_files:
+            return "No audio files provided.", None
+
+        results = []
+        output_files = []
+
+        for audio_file_path in audio_files:
+            try:
+                # Initialize the Whisper model
+                model = WhisperModel(model_name)
+
+                # Get the file name without extension from the uploaded file
+                audio_filename = os.path.basename(audio_file_path)
+                base_name, _ = os.path.splitext(audio_filename)
+
+                # Ensure the directory for saving files exists
+                directory = os.path.join("outputs", "transcriptions")
+                os.makedirs(directory, exist_ok=True)
+
+                # Transcribe the audio file
+                segments, _ = model.transcribe(audio_file_path, word_timestamps=True)
+                wordlevel_info = []
+
+                # Extract word-level timing information
+                for segment in segments:
+                    for word in segment.words:
+                        wordlevel_info.append({'word': word.word, 'start': word.start, 'end': word.end})
+
+                # Save the JSON file with the same base name as the audio file
+                json_filename = f"{base_name}.json"
+                json_filepath = os.path.join(directory, json_filename)
+                with open(json_filepath, 'w') as f:
+                    json.dump(wordlevel_info, f, indent=4)
+
+                # Append success message and file path
+                results.append(f"Transcription completed for {audio_filename}.")
+                output_files.append(json_filepath)
+
+            except Exception as e:
+                # Append error message for the specific file
+                results.append(f"Error during transcription for {audio_filename}: {str(e)}")
+
+        # Return combined results and file paths
+        combined_results = "\n".join(results)
+        return combined_results, output_files
+
     def create_pipeline_inputs(self):
         whisper_params = self.default_params["whisper"]
         vad_params = self.default_params["vad"]
@@ -285,6 +332,42 @@ class App:
                                                          self.args.output_dir, "UVR", "vocals"
                                                      )))
 
+                with gr.TabItem("Subtitme Timing Words"):  # tab6
+                    with gr.Column():
+                        input_file = gr.Files(type="filepath", label="Upload File here")
+                        tb_input_folder = gr.Textbox(label="Input Folder Path (Optional)",
+                                                     info="Optional: Specify the folder path where the input files are located, if you prefer to use local files instead of uploading them."
+                                                          " Leave this field empty if you do not wish to use a local path.",
+                                                     visible=self.args.colab,
+                                                     value="")
+
+                    whisper_params = self.default_params["whisper"]
+
+                    with gr.Row():
+                        dd_model = gr.Dropdown(choices=self.whisper_inf.available_models, value=whisper_params["model_size"],
+                                               label="Model")
+                    
+                        dd_lang = gr.Dropdown(choices=["Automatic Detection"] + self.whisper_inf.available_langs,
+                                              value=whisper_params["lang"], label="Language")
+                                              
+                    with gr.Row():
+                        btn_run = gr.Button("GENERATE TIMING DATA JSON FILE", variant="primary")
+                        
+                    with gr.Row():
+                        tb_indicator = gr.Textbox(label="Output", scale=5)
+                        files_subtitles = gr.Files(label="Downloadable output file", scale=3, interactive=False)
+                        btn_openfolder = gr.Button('📂', scale=1)
+
+                    btn_run.click(
+                        fn=lambda files, model_size: self.transcribe_audio_timing(
+                            model_name=model_size,
+                            audio_files=files  # Pass the list of files
+                        ),
+                        inputs=[input_file, dd_model],  # Pass individual components
+                        outputs=[tb_indicator, files_subtitles]  # Two outputs: combined messages and file paths
+                    )
+                    
+                    btn_openfolder.click(fn=lambda: self.open_folder("outputs"), inputs=None, outputs=None)
         # Launch the app with optional gradio settings
         args = self.args
         self.app.queue(
